@@ -1,3 +1,1 @@
-<p align="center">
-  $${{\\color{green}\\Huge{\\text{OPEN-SOURCE}}}}$$
-</p>
+$$\Huge \color{green} \text{OPEN-SOURCE}$$
