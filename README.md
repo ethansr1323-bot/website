@@ -1,1 +1,3 @@
-<h3><font color="green">OPEN-SOURCE</font></h3>
+<p align="center">
+  $_{\\Huge{\\color{green}\\text{OPEN-SOURCE}}}$
+</p>
