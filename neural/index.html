@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>neural thing</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <button id="aiVisBtn">AI</button>
+  <button id="downloadBtn">Download</button>
+  <button id="loadBtn">Load</button>
+  <input type="file" id="loadInput" accept=".txt" style="display: none;">
+  <div id="aiModal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h2>AI Generation #<span id="genNum"></span></h2>
+      <canvas id="aiCanvas"></canvas>
+      <div id="aiParams"></div>
+    </div>
+  </div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
