@@ -169,9 +169,36 @@ code {
   opacity: 0.8;
 }
 
+.contact {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  padding: 10px 14px;
+  border: 2px solid var(--fg);
+  border-radius: 2px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.contact:hover,
+.contact:focus-visible {
+  background: var(--fg);
+  color: var(--bg);
+  outline: none;
+}
+
 @media (max-width: 700px) {
-  .side {
+  .contact {
     top: 16px;
+    left: 16px;
+  }
+
+  .side {
+    top: 64px;
     right: 16px;
     left: 16px;
     transform: none;
