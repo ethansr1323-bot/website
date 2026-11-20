@@ -402,6 +402,8 @@ r.onsuccess = r.onerror = r.onblocked = function () { res(); };
 try {
 localStorage.removeItem('gdWasmSize');
 localStorage.removeItem('gdDataSize');
+localStorage.removeItem('miniGeodeIconHackEnabled');
+localStorage.removeItem('miniGeodeIconHackBackup');
 } catch (e) {}
 Promise.all(jobs).then(function () { location.reload(); },
 function () { location.reload(); });
@@ -531,6 +533,8 @@ return gdSavePromise;
 }
 return runSave();
 }
+window.__gdSaveNow = performSave;
+window.__gdSaveFiles = saveAppData;
 function scheduleSave(now) {
 if (!window.__gdRuntimeReady || !window.__gdSavesRestored) return;
 if (gdSaveTimer) clearTimeout(gdSaveTimer);
@@ -954,10 +958,12 @@ Module.FS.chdir('/Resources');
 say('FS.chdir failed: ' + e);
 }
 setTimeout(function () {
-restoreSaves(function () {
+restoreSaves(async function () {
 window.__gdSavesRestored = true;
 setProgress(88);
 try {
+if (typeof window.__miniGeodeBeforeBoot === 'function')
+await window.__miniGeodeBeforeBoot();
 const r = Module._gd_boot();
 setProgress(92);
 if (r && typeof r.then === 'function') {
@@ -1456,11 +1462,290 @@ e.preventDefault();
 e.returnValue='';
 });
 document.addEventListener('contextmenu',function(e){e.preventDefault();});
-function firstPointerDown(){
+function firstPointerDown(e){
+if(e.target&&e.target.closest&&e.target.closest('#miniGeode'))return;
 document.removeEventListener('pointerdown',firstPointerDown,true);
 var audio=window.Module&&window.Module.gdAudioContext;
 if(audio&&audio.state==='suspended')audio.resume();
 if(!document.fullscreenElement){var button=document.getElementById('fsBtn');if(button)button.click();}
 }
 document.addEventListener('pointerdown',firstPointerDown,true);
-})();</script></body></html>
+})();</script>
+<style>
+#miniGeode{position:fixed;top:14px;right:14px;z-index:60;font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:#eef2ff}
+#mgLaunch,#mgPanel button{font:inherit}
+#mgLaunch{border:1px solid #5b65a8;border-radius:8px;padding:8px 12px;color:#fff;background:#151936eF;box-shadow:0 6px 24px #0008;cursor:pointer}
+#mgLaunch:hover,#mgLaunch:focus-visible{background:#242d5a;outline:2px solid #aeb8ff;outline-offset:2px}
+#mgPanel{box-sizing:border-box;width:min(360px,calc(100vw - 28px));max-height:calc(100vh - 72px);overflow:auto;margin-top:8px;padding:16px;border:1px solid #454d7c;border-radius:12px;background:#101322f5;box-shadow:0 16px 48px #000b;backdrop-filter:blur(12px)}
+#mgPanel[hidden]{display:none}
+.mg-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.mg-head h2{margin:0;font-size:16px}
+#mgClose{border:0;border-radius:6px;padding:4px 8px;color:#dce1ff;background:#272b43;cursor:pointer}
+.mg-note{margin:0 0 12px;color:#c0c6dc;font-size:12px}
+.mg-warning{padding:9px 10px;border-left:3px solid #e8b84c;border-radius:4px;background:#332b18;color:#f6dfa6;font-size:11px}
+.mg-status{margin:14px 0;padding:12px;border:1px solid #343952;border-radius:9px;background:#0a0c16;color:#c4cbe3;font-size:12px}
+.mg-actions{display:grid;gap:8px}
+.mg-action,.mg-restore{width:100%;border:1px solid #5d67a6;border-radius:7px;padding:9px 10px;color:#fff;background:#252d58;cursor:pointer}
+.mg-restore{border-color:#5b5267;background:#292536}
+.mg-action:hover,.mg-restore:hover{filter:brightness(1.2)}
+.mg-action:disabled,.mg-restore:disabled{opacity:.55;cursor:wait}
+.mg-foot{margin:12px 0 0;color:#999fb8;font-size:10px}
+@media(prefers-reduced-motion:no-preference){#mgPanel{animation:mg-in .16s ease-out}@keyframes mg-in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}}
+</style>
+<div id="miniGeode">
+  <button id="mgLaunch" type="button" aria-expanded="false" aria-controls="mgPanel">Mini Geode</button>
+  <section id="mgPanel" aria-label="Mini Geode mod menu" hidden>
+    <header class="mg-head"><h2>Mini Geode</h2><button id="mgClose" type="button" aria-label="Close Mini Geode">Close</button></header>
+    <p class="mg-note">Local save mod</p>
+    <div class="mg-warning">Unlocks the icon shapes and both color palettes in this browser’s Geometry Dash save. It makes a backup of the current unlock flags and reloads the game to apply changes. Nothing is sent to an account or server.</div>
+    <div id="mgStatus" class="mg-status" role="status" aria-live="polite"></div>
+    <div class="mg-actions">
+      <button id="mgEnable" class="mg-action" type="button">Unlock all icons and colors</button>
+      <button id="mgRestore" class="mg-restore" type="button" hidden>Restore previous unlocks</button>
+    </div>
+    <p class="mg-foot">Covers cubes, ships, balls, UFOs, waves, robots, spiders, swings, jetpacks, and primary/secondary colors. Restoring resets only those unlock flags to the backup snapshot.</p>
+  </section>
+</div>
+<script>
+(function(){
+  var root=document.getElementById('miniGeode');
+  var launch=document.getElementById('mgLaunch');
+  var panel=document.getElementById('mgPanel');
+  var close=document.getElementById('mgClose');
+  var status=document.getElementById('mgStatus');
+  var enable=document.getElementById('mgEnable');
+  var restore=document.getElementById('mgRestore');
+  var stateKey='miniGeodeIconHackEnabled';
+  var backupKey='miniGeodeIconHackBackup';
+  var categories=['i','ship','ball','bird','dart','robot','spider','swing','jetpack','c0','c1'];
+  var categoryPattern=new RegExp('^(?:'+categories.join('|')+')_\\d+$');
+  function setStatus(message,isError){
+    status.textContent=message;
+    status.style.borderColor=isError?'#b85c5c':'';
+  }
+  function enabled(){
+    try{return localStorage.getItem(stateKey)==='1';}
+    catch(e){return false;}
+  }
+  function getBackup(){
+    try{
+      var raw=localStorage.getItem(backupKey);
+      if(!raw)return null;
+      var backup=JSON.parse(raw);
+      return backup&&backup.version===1&&backup.entries&&typeof backup.entries==='object'?backup:null;
+    }catch(e){return null;}
+  }
+  function refresh(){
+    var active=enabled();
+    var backup=getBackup();
+    enable.hidden=active;
+    restore.hidden=!backup;
+    if(active)setStatus('Icon Hack is enabled. The save is patched before the game loads.');
+    else if(backup)setStatus('Icon Hack is off. Restore the original icon and color unlock flags when ready.');
+    else setStatus('Icon Hack is off. Your save has not been changed.');
+  }
+  function setOpen(open){
+    panel.hidden=!open;
+    launch.setAttribute('aria-expanded',String(open));
+    if(open)close.focus();
+    else launch.focus();
+  }
+  function xmlEntries(dict){
+    var children=dict.children;
+    var entries=[];
+    for(var i=0;i+1<children.length;i+=2){
+      if(children[i].tagName.toLowerCase()==='k')
+        entries.push({key:children[i].textContent,keyNode:children[i],value:children[i+1]});
+    }
+    return entries;
+  }
+  function findValue(dict,key){
+    var entries=xmlEntries(dict);
+    for(var i=0;i<entries.length;i++)if(entries[i].key===key)return entries[i].value;
+    return null;
+  }
+  function isManagedKey(key){
+    return categoryPattern.test(key);
+  }
+  function snapshotUnlocks(dict){
+    var entries={};
+    xmlEntries(dict).forEach(function(entry){
+      var tag=entry.value.tagName.toLowerCase();
+      if(isManagedKey(entry.key)&&(tag==='t'||tag==='f'))entries[entry.key]=tag;
+    });
+    return {version:1,entries:entries};
+  }
+  function makeValue(document,key,valueTag){
+    var keyNode=document.createElement('k');
+    keyNode.textContent=key;
+    var valueNode=document.createElement(valueTag);
+    return [keyNode,valueNode];
+  }
+  function unlockAll(document,dict){
+    var present=Object.create(null);
+    xmlEntries(dict).forEach(function(entry){
+      if(!isManagedKey(entry.key))return;
+      entry.value.parentNode.replaceChild(document.createElement('t'),entry.value);
+      present[entry.key]=true;
+    });
+    categories.forEach(function(category){
+      for(var id=0;id<1000;id++){
+        var key=category+'_'+id;
+        if(present[key])continue;
+        var pair=makeValue(document,key,'t');
+        dict.appendChild(pair[0]);
+        dict.appendChild(pair[1]);
+      }
+    });
+  }
+  function restoreUnlocks(document,dict,entries){
+    xmlEntries(dict).forEach(function(entry){
+      if(isManagedKey(entry.key)){
+        entry.keyNode.parentNode.removeChild(entry.keyNode);
+        entry.value.parentNode.removeChild(entry.value);
+      }
+    });
+    Object.keys(entries).sort().forEach(function(key){
+      if(!isManagedKey(key))return;
+      var tag=entries[key]==='t'?'t':'f';
+      var pair=makeValue(document,key,tag);
+      dict.appendChild(pair[0]);
+      dict.appendChild(pair[1]);
+    });
+  }
+  function toBinary(bytes){
+    var result='';
+    for(var offset=0;offset<bytes.length;offset+=8192)
+      result+=String.fromCharCode.apply(null,bytes.subarray(offset,Math.min(offset+8192,bytes.length)));
+    return result;
+  }
+  async function gzip(bytes,StreamType){
+    if(typeof StreamType!=='function')throw new Error('This browser does not support save compression.');
+    var stream=new Blob([bytes]).stream().pipeThrough(new StreamType('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function decodeSave(bytes){
+    var prefix=new TextDecoder().decode(bytes.subarray(0,5));
+    if(prefix==='<?xml')return {xml:new TextDecoder('utf-8',{fatal:true}).decode(bytes),plain:true};
+    var encoded='';
+    for(var i=0;i<bytes.length;i+=8192){
+      var part=bytes.subarray(i,Math.min(i+8192,bytes.length));
+      var chars=new Uint8Array(part.length);
+      for(var j=0;j<part.length;j++)chars[j]=part[j]^11;
+      encoded+=new TextDecoder('ascii').decode(chars);
+    }
+    encoded=encoded.replace(/-/g,'+').replace(/_/g,'/');
+    while(encoded.length%4)encoded+='=';
+    var binary=atob(encoded);
+    var compressed=new Uint8Array(binary.length);
+    for(var bi=0;bi<binary.length;bi++)compressed[bi]=binary.charCodeAt(bi);
+    var unpacked=await gzip(compressed,DecompressionStream);
+    return {xml:new TextDecoder('utf-8',{fatal:true}).decode(unpacked),plain:false};
+  }
+  async function encodeSave(xml,plain){
+    var xmlBytes=new TextEncoder().encode(xml);
+    if(plain)return xmlBytes;
+    var compressed=await gzip(xmlBytes,CompressionStream);
+    var encoded=btoa(toBinary(compressed)).replace(/\+/g,'-').replace(/\//g,'_');
+    var result=new Uint8Array(encoded.length);
+    for(var i=0;i<encoded.length;i++)result[i]=encoded.charCodeAt(i)^11;
+    return result;
+  }
+  async function patchSave(shouldEnable){
+    var fs=window.Module&&Module.FS;
+    var path='/AppData/CCGameManager.dat';
+    if(!fs||!fs.analyzePath||!fs.analyzePath(path).exists)
+      throw new Error('CCGameManager.dat was not found. Start the game, save once, then try again.');
+    var decoded=await decodeSave(fs.readFile(path));
+    var document=new DOMParser().parseFromString(decoded.xml,'application/xml');
+    if(document.getElementsByTagName('parsererror').length)
+      throw new Error('The local save could not be parsed; no save changes were made.');
+    var rootDict=document.documentElement.children[0];
+    if(!rootDict||rootDict.tagName.toLowerCase()!=='dict')
+      throw new Error('The local save has an unexpected format; no save changes were made.');
+    var valueKeeper=findValue(rootDict,'valueKeeper');
+    if(!valueKeeper){
+      var pair=makeValue(document,'valueKeeper','d');
+      rootDict.appendChild(pair[0]);
+      rootDict.appendChild(pair[1]);
+      valueKeeper=pair[1];
+    }
+    if(valueKeeper.tagName.toLowerCase()!=='d')
+      throw new Error('The save’s unlock data has an unexpected format.');
+    var backup=getBackup();
+    if(shouldEnable){
+      if(!backup){
+        backup=snapshotUnlocks(valueKeeper);
+        localStorage.setItem(backupKey,JSON.stringify(backup));
+      }
+      unlockAll(document,valueKeeper);
+    }else if(backup){
+      restoreUnlocks(document,valueKeeper,backup.entries);
+    }else{
+      return false;
+    }
+    fs.writeFile(path,await encodeSave(new XMLSerializer().serializeToString(document),decoded.plain));
+    if(typeof window.__gdSaveFiles==='function')await window.__gdSaveFiles();
+    if(!shouldEnable)localStorage.removeItem(backupKey);
+    return true;
+  }
+  window.__miniGeodeBeforeBoot=async function(){
+    var shouldEnable=enabled();
+    if(!shouldEnable&&!getBackup())return;
+    try{
+      setStatus(shouldEnable?'Unlocking icon shapes and colors...':'Restoring the previous unlock flags...');
+      var changed=await patchSave(shouldEnable);
+      setStatus(changed
+        ?(shouldEnable?'All supported icon shapes and colors are unlocked.':'Previous icon and color unlocks restored.')
+        :'No unlock backup was found.');
+      refresh();
+    }catch(error){
+      console.error('[Mini Geode] Icon Hack failed:',error);
+      if(shouldEnable&&!getBackup()){
+        try{localStorage.removeItem(stateKey);}
+        catch(storageError){console.error('[Mini Geode] Could not clear the failed activation flag:',storageError);}
+        enable.hidden=false;
+        restore.hidden=true;
+      }
+      setStatus('Icon Hack could not update the local save: '+error.message,true);
+    }
+  };
+  function requestChange(shouldEnable){
+    if(!window.__gdRuntimeReady||!window.__gdSavesRestored){
+      setStatus('Wait for the game to finish loading before changing save unlocks.',true);
+      return;
+    }
+    if(!shouldEnable&&!getBackup()){
+      setStatus('There is no saved unlock backup to restore.',true);
+      return;
+    }
+    enable.disabled=true;
+    restore.disabled=true;
+    setStatus('Saving your current progress before reloading...');
+    Promise.resolve().then(function(){
+      if(typeof window.__gdSaveNow!=='function')throw new Error('The game save function is unavailable.');
+      return window.__gdSaveNow();
+    }).then(function(){
+      localStorage.setItem(stateKey,shouldEnable?'1':'0');
+      setStatus(shouldEnable?'Applying Icon Hack and reloading...':'Restoring saved unlocks and reloading...');
+      setTimeout(function(){location.reload();},350);
+    }).catch(function(error){
+      console.error('[Mini Geode] Could not prepare save:',error);
+      setStatus('Could not save before applying: '+error.message,true);
+      enable.disabled=false;
+      restore.disabled=false;
+    });
+  }
+  launch.addEventListener('click',function(){setOpen(panel.hidden);});
+  close.addEventListener('click',function(){setOpen(false);});
+  enable.addEventListener('click',function(){requestChange(true);});
+  restore.addEventListener('click',function(){
+    if(confirm('Restore the icon and color unlock flags captured before Icon Hack was enabled? Other game progress will be kept.'))
+      requestChange(false);
+  });
+  document.addEventListener('keydown',function(event){
+    if(event.key==='Escape'&&!panel.hidden&&root.contains(event.target))setOpen(false);
+  });
+  refresh();
+})();
+</script></body></html>
